@@ -1,0 +1,844 @@
+---
+title: "Wikipedia's content evaluation through multidimensional indices"
+author: "André M. Rodeguero Stefanuto"
+date: "2026-07/07"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    toc_float: true
+    smooth_scroll: false
+  pdf_document:
+    toc: true
+    toc_depth: '2'
+  word_document:
+    toc: true
+    toc_depth: '2'
+---
+
+```{r setup, include=FALSE}
+#general setups to code chunks
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{css, justifying text, echo = FALSE, include = FALSE}
+body {
+  text-align: justify;
+}
+```
+
+# Step 1: Loading packages and datasets into R ecosystem
+
+We used following packages and datasets during the analysis. They must be loaded into R ecosystem.
+
+```{r, retrieving packages, results = FALSE}
+#If the packages are not installed, use "install.packages("package_name")" before retrieving them;
+library(tidyverse)
+library(corrplot)
+library(ggh4x)
+library(Hmisc)
+library(psych)
+library(ggalluvial)
+library(broom)
+library(viridis)
+library(gridExtra)
+library(cowplot)
+library(flextable)
+library(svglite)
+library(officer)
+```
+
+```{r, loading datasets, results = FALSE}
+#In this analysis, the datasets must be locally downloaded.  They are also available in the open repository;
+wiki_diseases <- read.csv("./data/input/wiki_diseases.csv", header = TRUE)
+dis_references <- read.csv("./data/input/art_references.csv", header = TRUE)
+```
+
+# Step 2: Organizing the data
+
+After loading the datasets, we grouped the data by disease and language editions containing articles within the target categories. We then aggregated them at the language level by summing word count, images, intrawiki links, sections, unique editors, total edits, and references across all articles in that language. For the last-edit-date variable, we computed the mean year across articles, then subtracted this from the year of data collection to obtain “time since last edit” (TSLE), in years.
+
+```{r grouping data, results = FALSE}
+#First of all, we need to group the data in each disease and language and, then, sum the metrics in each one of them.
+grouped_data <- wiki_diseases |> 
+  select(-category) |> 
+  group_by(disease, language) |>
+  summarise(
+    # 1) Sum of numeric variables
+    across(
+      c(words, images, intrawikis, sections, total_edits, unique_editors),
+      sum,
+      .names = "{.col}"
+    ),
+
+    # 2) Calculating "Year" means
+    across(last_edit,
+      ~ mean(year(ymd_hms(.x)), na.rm = TRUE, digits = 0),
+      .names = "m_{.col}"
+    ),
+
+    .groups = "drop"
+  ) |> 
+  mutate(
+    tsle = round(year(today()-1) - m_last_edit, 3)
+  ) |> 
+  select(-c(m_last_edit))
+
+```
+
+# Step 3: Evaluating patterns within the data
+
+We first assessed relationships among variables using Pearson's and Spearman's correlation coefficients, coefficients to evaluate internal structure and to check for both linear and non-linear associations within each dimension. Then, we performed a Mann-Whitney-Wilcoxon test, between Parkinson's and Alzheimer's diseases data across all eight variables to compare their distribution*. In addition to this last test, we also calculated the medians to describe the central tendency of those distributions.
+
+*Mann-Whitney-Wilcoxon and medians calculation scripts are presented in further steps, as they were performed over the full version of the dataset, which contains all textual, editorial, and referential base variables.
+
+```{r, pearsons correlation: textual dimension, results = FALSE}
+#Pearson correlation index
+corrtext_pears <- grouped_data |> 
+  select(disease, words, images, intrawikis, sections) |> 
+  group_by(disease) |>
+  summarise(
+    corr = list(cor(across(everything()), method = "pearson"))
+    )
+
+#corrtext_pears$corr[1] #Alzheimer's Disease
+#corrtext_pears$corr[2] #Parkinson's Disease
+
+#Significance index for Pearson's correlation
+text_pears_pindex <- grouped_data |> 
+        select(disease, words, images, intrawikis, sections) |> 
+      group_by(disease) |>
+      summarise(
+        p_index = list(
+          rcorr(as.matrix(across(everything())), type = "pearson")$P
+        ),
+        .groups = "drop"
+      )
+#text_pears_pindex$p_index[1] #Alzheimer's Disease
+#text_pears_pindex$p_index[2] #Parkinson's Disease
+```
+
+```{r, spearmans correlation: textual dimension, results = FALSE}
+#Spearman correlation index
+corrtext_spear <- grouped_data |> 
+  select(disease, words, images, intrawikis, sections) |> 
+  group_by(disease) |>
+  summarise(
+    corr = list(cor(across(everything()), method = "spearman"))
+    )
+
+#corrtext_spear$corr[1] #Alzheimer's Disease
+#corrtext_spear$corr[2] #Parkinson's Disease
+
+#Significance index for Spearman's correlation
+text_spearm_pindex <- grouped_data |> 
+      select(disease, words, images, intrawikis, sections) |> 
+      group_by(disease) |>
+      summarise(
+        p_index = list(
+          rcorr(as.matrix(across(everything())), type = "spearman")$P
+        ),
+        .groups = "drop"
+      )
+
+#text_spearm_pindex$p_index[1] #Alzheimer's Disease
+#text_spearm_pindex$p_index[2] #Parkinson's Disease
+```
+
+```{r, pearsons correlation: editorial dimension, results = FALSE}
+#Pearson correlation index
+corredits_pears <- grouped_data |> 
+  select(disease, unique_editors, total_edits, tsle) |> 
+  group_by(disease) |>
+  summarise(
+    corr = list(cor(across(everything()), method = "pearson"))
+    )
+
+#corredits_pears$corr[1] #Alzheimer's Disease
+#corredits_pears$corr[2] #Parkinson's Disease
+
+#Significance index for Pearson correlation
+edits_pears_pindex <- grouped_data |> 
+        select(disease, unique_editors, total_edits) |> 
+      group_by(disease) |>
+      summarise(
+        p_index = list(
+          rcorr(as.matrix(across(everything())), type = "pearson")$P
+        ),
+        .groups = "drop"
+      )
+#edits_pears_pindex$p_index[1] #Alzheimer's Disease
+#edits_pears_pindex$p_index[2] #Parkinson's Disease
+```
+
+```{r, spearmans correlation: editorial dimension, results = FALSE}
+#Spearman correlation index
+corredits_spear <- grouped_data |> 
+  select(disease, unique_editors, total_edits, tsle) |> 
+  group_by(disease) |>
+  summarise(
+    corr = list(cor(across(everything()), method = "spearman"))
+    )
+
+#corredits_spear$corr[1] #Alzheimer's Disease
+#corredits_spear$corr[2] #Parkinson's Disease
+
+#Significance index for Spearman correlation
+edits_spearm_pindex <- grouped_data |> 
+      select(disease, unique_editors, total_edits) |> 
+      group_by(disease) |>
+      summarise(
+        p_index = list(
+          rcorr(as.matrix(across(everything())), type = "spearman")$P
+        ),
+        .groups = "drop"
+      )
+
+#edits_spearm_pindex$p_index[1] #Alzheimer's Disease
+#edits_spearm_pindex$p_index[2] #Parkinson's Disease
+
+```
+
+# Step 4: Preparing Multidimensional Content Index (Multcoin) intermediate/dimensional instances
+
+After grouping all variables by language for both diseases, we aggregated them into three dimension-specific indices (textual, editorial, referential), using equal weighting across variables and dimensions. Within each dimension, variables were ranked in descending order, except TSLE, which was ranked in ascending order so that lower time-since-last-edit values received higher ranks; tied values were fully preserved.
+
+```{r, calculating textual dimension index, results = FALSE}
+#Creating index based on the sums of target variables.
+textindex_data <- grouped_data |>
+  pivot_longer(cols = c(words, images, intrawikis, sections), names_to = "variable",                  
+               values_to = "value") |> 
+  group_by(disease, variable) |> 
+  mutate(
+    rank = {
+      r <- rank(-value, ties.method = "min")
+      match(r, sort(unique(r)))
+    }
+  ) |>
+  ungroup() |>
+  pivot_wider(
+    names_from = variable,
+    values_from = c(value, rank),
+    names_glue = "{variable}_{.value}") |>
+  rowwise() |>
+  mutate(total_text_rank = sum(c_across(ends_with("_rank")))) |>
+  ungroup() |>
+  group_by(disease) |>
+  mutate(
+    textual_index = {
+      r <- rank(total_text_rank, ties.method = "min")
+      match(r, sort(unique(r)))
+    }
+  ) |>
+  ungroup() |> 
+  select(-c(words_value, images_value, intrawikis_value, sections_value, total_text_rank))
+```
+
+```{r, calculating editorial index, results = FALSE}
+#Next, we need to create a edits index. This steps must be executed after the textual index;
+editindex_data <- textindex_data |>
+  select(-c(words_rank, sections_rank, images_rank, intrawikis_rank)) |> 
+    pivot_longer(cols = c(unique_editors, total_edits, tsle), names_to = "variable",        
+                 values_to = "value") |> 
+  group_by(disease, variable) |> 
+  mutate(
+    rank = {
+      score <- if_else(
+        variable %in% "tsle",
+        value,      # lower values → lower rankings
+        -value      # higher values → higher rankings
+      )
+      r <- rank(score, ties.method = "min")
+      match(r, sort(unique(r)))
+    }
+  ) |> 
+  ungroup() |> 
+  pivot_wider(
+    names_from = variable,
+    values_from = c(value, rank),
+    names_glue = "{variable}_{.value}") |> 
+  rowwise() |> 
+  mutate(final_edits_rank = sum(c_across(c("unique_editors_rank", "total_edits_rank", 
+                                           "tsle_rank")))) |>
+  ungroup() |> 
+  group_by(disease) |>
+  mutate(
+    edits_index = {
+      r <- rank(final_edits_rank, ties.method = "min")
+      match(r, sort(unique(r)))
+    }
+  ) |>
+  ungroup() |> 
+  select(-c(final_edits_rank, unique_editors_value, total_edits_value, tsle_value,
+            unique_editors_rank, total_edits_rank, tsle_rank))
+```
+
+```{r, reference counting, results = FALSE}
+#Let's count, independently of the year, the number of references used in each language and disease.
+ref_variables <- dis_references |>
+  select(-c(category, reference, cctld, doi, pmid)) |>
+  mutate(year = na_if(year, 0)) |> 
+  group_by(disease, language) |> 
+    summarise(
+      n = n()
+        ) |>
+  arrange(disease, desc(n)) |> 
+  rename(ref_count = n)
+```
+
+```{r, reference merging into previous dataset, results = FALSE}
+#Since references are in a different dataset, we need to merge them. Some languages, in each disease, doesn't have any references at all and are no accounted in the dataset. Therefore, the observations are accounted as 'NA'. During the ranking in the next chunk, every NA will be assign the lower position.
+merged_refindex <- full_join(ref_variables, editindex_data, 
+                           by = c("disease", "language")) |>
+                 arrange(disease) |> 
+                 select(disease, language, ref_count,
+                        everything()) |> 
+                 mutate(ref_count = replace_na(ref_count, 0))
+```
+
+```{r, calculating referential index, results = FALSE}
+refindex_data <- merged_refindex |>
+  select(disease, language, ref_count, textual_index, edits_index) |>
+  pivot_longer(
+    cols = c(ref_count),
+    names_to = "variable",
+    values_to = "value"
+  ) |>
+  group_by(disease, variable) |>
+    mutate(
+      rank = {
+        score <- if_else(
+          is.na(value),
+          Inf,        
+            if_else(
+              variable %in% "tsle",
+              value,    
+              -value    
+            )
+        )
+        r <- rank(score, ties.method = "min")
+        match(r, sort(unique(r)))
+      }
+    ) |>
+  ungroup() |> 
+  pivot_wider(
+    names_from = variable,
+    values_from = c(value, rank),
+    names_glue = "{variable}_{.value}"
+  ) |>
+  rowwise() |>
+  ungroup() |> 
+  group_by(disease) |>
+  mutate(
+    ref_idx = {
+      r <- rank(ref_count_rank, ties.method = "min", na.last = TRUE)
+      match(r, sort(unique(r)))
+    }
+  ) |>
+  ungroup()
+```
+
+```{r, creating final dimensional indexes dataset, results = FALSE}
+#After this process, we can set place to the final dimensional indices, without their intermediary results and evaluation;
+
+all_index_data <- refindex_data |> 
+  select(
+    -ends_with("_value"),
+    -ends_with("_rank")
+  )
+names(all_index_data) <- c("disease", "language", "txt_idx", "edt_idx", "ref_idx")
+```
+
+# Step 5: Calculating Multidimensional Content Index (Multcoin) and Multidimensional Stability Index (Multstabin)
+
+As ties were very common, the ranks were normalized to a 0 to 1 interval, to ensure comparability across indices. Then, each normalized index was divided into five classes of equal width (0.2 interval, from 1, lower, to 5, higher). Next, the arithmetic mean of those classes composed the Multidimensional Content Index (Multcoin).
+
+Based on the five-class rating of each dimensional index (textual, editorial, referential), we measured content stability for each language as follows: observations falling in the same class across all three indices received a “High” (H) stability classification; observations in which two of three classifications coincided received a “Medium” (M) classification; and observations in which all three classifications differed received a “Low” (L) classification.
+
+```{r, final version of dataset, results = FALSE}
+final_dataset <- all_index_data |>
+    group_by(disease) |>  
+  
+  #Creating normalized (between 0 and 1) dimensional indexes
+  mutate(
+    nm_txt = round(1 - (txt_idx - min(txt_idx)) / (max(txt_idx) - min(txt_idx)), 2),
+    nm_edt = round(1 - (edt_idx - min(edt_idx)) / (max(edt_idx) - min(edt_idx)), 2),
+    nm_ref = round(1 - (ref_idx - min(ref_idx)) / (max(ref_idx) - min(ref_idx)), 2)
+  ) |> 
+  
+  #Creating classes from 1, lower, to 5, higher, across the normalized indexes
+    mutate(
+    parc_txt = cut(nm_txt, breaks = seq(0, 1, length.out = 6),
+                  labels = 1:5, include.lowest = TRUE),
+    parc_edt = cut(nm_edt, breaks = seq(0, 1, length.out = 6),
+                  labels = 1:5, include.lowest = TRUE),
+    parc_ref = cut(nm_ref, breaks = seq(0, 1, length.out = 6),
+                  labels = 1:5, include.lowest = TRUE)
+  ) |> 
+    select(disease, language, txt_idx, nm_txt, parc_txt, edt_idx, nm_edt, parc_edt, ref_idx, nm_ref, parc_ref) |>
+  
+   # Creating a final index, based on arithmetic means of the three dimensional indexes
+    mutate(
+      multcoin = round((nm_txt + nm_edt + nm_ref)/3, 2)
+    ) |> 
+  
+    mutate(
+      parc_multcoin = cut(multcoin, breaks = seq(0, 1, length.out = 6),
+                         labels = 1:5, include.lowest = TRUE)
+    ) |> 
+  
+    mutate(
+      class_multcoin = case_when(
+        parc_multcoin == 1 ~ "Very Poor",
+        parc_multcoin == 2 ~ "Poor",
+        parc_multcoin == 3 ~ "Regular",
+        parc_multcoin == 4 ~ "Rich",
+        parc_multcoin == 5 ~ "Very Rich"
+      )
+    ) |>
+  
+  # Creating a stability index based on the previous classes from 1 to 5.
+    group_by(disease)  |>  
+    arrange(disease, desc(multcoin)) |> 
+    ungroup() |> 
+    mutate(
+    multstabin = case_when(
+      parc_txt == parc_edt & parc_edt == parc_ref ~ "h",
+      parc_txt == parc_edt | parc_txt == parc_ref | parc_edt == parc_ref ~ "m", TRUE ~ "l"
+    )
+  ) |> 
+    select(disease, language, multstabin, everything())
+```
+
+# Step 6: Organizing the resulting dataset
+
+```{r, full version of dataset, results = FALSE}
+#This version includes both final indices and intermediary results, including the initial variables.
+full_dataset <- final_dataset |> 
+  full_join(grouped_data, by = c("disease", "language")) |> 
+  full_join(merged_refindex, by = c("disease", "language")) |> 
+  select(disease, language, multstabin,
+         words, images, intrawikis, sections,
+         total_edits, unique_editors, tsle, 
+         ref_count, ref_idx, nm_ref, parc_ref,
+         txt_idx, nm_txt, parc_txt, edt_idx, nm_edt, parc_edt, ref_idx, nm_ref, parc_ref, multcoin, parc_multcoin)
+
+write_csv(full_dataset, "./data/output/results_parkalz_article.csv")
+```
+
+# Step 7: Performing Mann-Whitney-Wilcoxon test
+
+Mann-Whitney-Wilcoxon test was performed across the eight base variables and over the full version of the dataset. The test results, as the medians, minimums and maximums composed a summary of the data.
+
+```{r, mann-whitney-wilcoxon test and summary, results = FALSE}
+mann_med_data <- full_dataset |> 
+  select(disease, words, images, intrawikis, sections,
+         total_edits, unique_editors, tsle,
+         ref_count) |> 
+  pivot_longer(
+    cols = -disease,
+    names_to = "variable",
+    values_to = "value"
+  ) |> 
+  group_by(variable) |>
+  summarise(
+    # Performing Mann-Whitney-Wilcoxon test
+    test = list(
+      wilcox.test(value ~ disease, exact = FALSE)
+    ),
+    # Organizing data summary
+    alz_summary = {
+      s <- summary(value[disease == "Alzheimer"])
+      paste0(round(s["Median"], 1), " (", round(s["Min."], 1), "–", round(s["Max."], 1), ")")
+    },
+    park_summary = {
+      s <- summary(value[disease == "Parkinson"])
+      paste0(round(s["Median"], 1), " (", round(s["Min."], 1), "–", round(s["Max."], 1), ")")
+    },
+    .groups = "drop"
+  ) |>
+  mutate(
+    tidy = map(test, tidy)
+  ) |>
+  unnest(tidy) |>
+  select(variable, p.value, alz_summary, park_summary)
+```
+
+# Step 8: Data visualization
+
+## Step 8.1: Long version of data
+```{r full-dataset long version, results = FALSE}
+# Organizing a long version of the data set, with each variable-language-disease observation representing a row.
+vars_long_data <- full_dataset |> 
+  select(disease, language, words, images, intrawikis, sections,
+         total_edits, unique_editors, tsle,
+         ref_count) |>
+    pivot_longer(
+    cols = -c(disease, language),
+    names_to = "variable",
+    values_to = "value"
+  )
+```
+
+## Step 8.2: Graphic 1 - Distribution of individual variables
+```{r, individual variables data preparation, results = FALSE}
+var_names <- c(
+  "images" = "Images",
+  "intrawikis" = "Intrawikis",
+  "tsle" = "TSLE (years)",
+  "ref_count" = "References",
+  "sections" = "Sections",
+  "total_edits" = "Total Edits",
+  "unique_editors" = "Unique Editors",
+  "words" = "Words"
+)
+
+plot_trim <- vars_long_data |>
+  group_by(variable) |>
+  # Filtering the graph from 0 to 95% as the top 5% outliers make the graphics impractible
+  filter(
+    value <= quantile(value, 0.95, na.rm = TRUE)
+  ) |>
+  ungroup() |> 
+  # Defining factor levels for labeling
+  mutate(
+    disease = factor(
+      disease,
+      levels = c("Parkinson", "Alzheimer")
+    ),
+    label_disease = factor(
+      disease,
+      labels = c("Parkinson's Disease", "Alzheimer's Disease")
+    ),
+    variable = factor(
+      variable,
+      levels = c("images", "intrawikis", "sections", "words",
+                 "tsle", "total_edits", "unique_editors",
+                 "ref_count")
+    )
+  )
+
+# Defining the labels
+labels_names <- c("Alzheimer" = "Alzheimer's Disease",
+                  "Parkinson" = "Parkinson's Disease")
+```
+
+```{r, individual variables visualization, results = FALSE}
+gg_isovariable <- ggplot(plot_trim, aes(x = disease, y = value, fill = disease)) +
+  geom_violin(
+    width = 1,
+    position = position_dodge(width = 0.8),
+    trim = FALSE,
+    alpha = 0.9,
+    linewidth = .2
+  ) +
+  geom_boxplot(
+    width = 0.125,
+    alpha = 1,
+    position = position_dodge(width = 0.8),
+    outlier.shape = NA,
+    color = "black",
+    fill = "white",
+    lwd = .1
+  ) +
+  facet_wrap(
+    ~ variable,
+    scales = "free_y",
+    ncol = 4,
+    labeller = labeller(variable = var_names)
+  ) +
+  scale_fill_viridis(discrete = TRUE, labels = labels_names, begin = 0.2, end = 0.8) +  
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.1))) +
+  labs(
+    title = "Content distribution across variables",
+    subtitle = NULL,
+    y = "Language counting",
+    caption = "Note: TSLE = 'Time Since Last Edit'",
+    fill = NULL                                             # <-- título da legenda
+  ) +
+  theme_minimal(base_family = "serif") +
+  theme(
+    # Legend
+    legend.position      = "bottom",                         
+    legend.justification = "center",
+    legend.title         = element_blank(),
+    legend.text          = element_text(size = 12),
+    # Grid
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    # Panels border
+    panel.border = element_rect(color = "grey80", fill = NA, linewidth = 0.5),
+    # Axis titles
+    axis.title.y = element_text(size = 12, color = "black"),
+    axis.title.x = element_blank(),
+    axis.text.x  = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.text.y  = element_text(size = 11, color = "black"),
+    # Panels titles (strip)
+    strip.text       = element_text(size = 12),
+    strip.background = element_rect(fill = "grey90", color = NA),
+    # Title and subtitle
+    plot.title    = element_text(size = 14, face = "bold", color = "black"),
+    # Caption
+    plot.caption  = element_text(size = 9,  color = "gray10", hjust = 0),
+    # Margins
+    plot.margin = margin(10, 10, 10, 10)
+  )
+
+gg_isovariable
+
+# Exporting as .svg file for further editing
+#svg("graph_isolated_variables.svg", width = 8, height = 4)
+#print(gg_isovariable)
+#dev.off()
+```
+
+## Step 8.3: Statistics and data summary - table exporting
+```{r, table construction}
+mann_med_table <- mann_med_data |> 
+  mutate(variable = var_names[variable]) |> 
+  mutate(p.value = round(p.value, 3))
+names(mann_med_table) <- c("Variable", "P-value", "Summary Alzheimer", "Summary Parkinson")
+
+# 1. Building the table
+ft <- flextable(mann_med_table) |>
+  bg(bg = "white", part = "all") |>
+  border_remove() |>
+  hline_top(part = "header", border = fp_border(color = "black", width = 1.5)) |>
+  hline(part = "header",     border = fp_border(color = "black", width = 1.0)) |>
+  hline_bottom(part = "body",border = fp_border(color = "black", width = 1.5)) |>
+  add_footer_lines('Note: P-values were calculated by Mann-Whitney-Wilcoxon test; summaries are represented by "Median (Min value - Max value)".') |>
+  hline_top(part = "footer", border = fp_border(color = "black", width = 1.0)) |>
+  hline_bottom(part = "footer",border = fp_border(color = "black", width = 1.5)) |>
+  align(j = 1,   align = "left",   part = "all") |>
+  align(j = 2:4, align = "left", part = "all") |>
+  font(fontname = "Times New Roman", part = "all") |>
+  fontsize(size = 12, part = "body") |>                           
+  fontsize(size = 12, part = "header") |>                         
+  fontsize(size = 11, part = "footer") |>
+  italic(part = "footer") |>
+  bold(part = "header") |>
+  padding(padding.top    = 3.2, padding.bottom = 3.2,                
+          padding.left   = 4, padding.right  = 4, part = "all") |>
+  autofit()
+ft
+
+# Exporting as text to final formatting
+#save_as_docx(ft, path = "statistics_table.docx")
+```
+
+## Step 8.4: Graphic 2 - Stacked bar plot Multstabin vs Multcoin
+```{r, stacked bar plot - organizing, results = FALSE}
+groups_count <- final_dataset |>
+  group_by(disease, parc_multcoin, multstabin) |>
+  summarise(count = n(), .groups = "drop") |>
+  complete(disease, parc_multcoin, multstabin, fill = list(valor = 0)) |>
+  # Defining factor levels for labeling and ordering
+  mutate(
+    label_axis = factor(
+      parc_multcoin,
+      levels = rev(c(5, 4, 3, 2, 1)),
+      labels = rev(c("VR", "Ri", "Re", "Po", "VP"))
+    ),
+    label_graph = factor(
+      multstabin,
+      levels = c("h", "m", "l"),
+      labels = c("High", "Median",
+                 "Low")
+    ),
+    disease = factor(
+      disease,
+      levels = c("Parkinson", "Alzheimer"),
+      labels = c("Parkinson's Disease", "Alzheimer's Disease")
+    )
+  )
+```
+
+```{r, stacked bar plot - plotting, results = FALSE}
+gg_count <- ggplot(groups_count, aes(x = label_axis, y = count, fill = label_graph)) +
+  geom_col(position = "stack") +
+  geom_text(
+  aes(label = count),
+  position = position_stack(vjust = 0.5),
+  size = 4,
+  color = "white"
+) +
+  coord_flip() +
+  facet_wrap(~ disease) +
+  labs(
+    title = "Content distributions across multidimensional indexes",
+    x = "Multcoin classification*",
+    y = "Content counting",
+    fill = "Multstabin classification - Stability",
+    caption = "*VR = Very Rich; Ri = Rich; Re = Regular;
+  Po = Poor; VP = Very Poor"
+  ) +
+  theme_minimal(base_family = "serif") + 
+  scale_fill_viridis_d(option = "viridis", begin = 0.2, end = 0.85) +
+    theme(
+    # Legend
+    legend.position = "bottom",
+    legend.title.position = "top",
+    legend.text = element_text(size = 12),
+    # Grid 
+    panel.grid.minor.x = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    panel.grid.major.y = element_blank(),
+    # Text
+    axis.title.y = element_text(size = 12, color = "black"),
+    axis.title.x = element_text(size = 12, color = "black"),
+    axis.text.x = element_text(size = 11, color = "black"),
+    axis.text.y = element_text(size = 11, color = "black"),
+    plot.title = element_text(size = 14, color = "black", face = "bold"),
+    strip.text = element_text(size = 12),
+    plot.caption  = element_text(size = 9,  color = "gray10", hjust = 0),
+    # Border
+    panel.border = element_rect(color = "grey80", fill = NA, linewidth = 0.5),
+    strip.background = element_rect(fill = "grey90", color = NA)
+  )
+
+gg_count
+
+# Exporting as .svg file for further editing
+#svg("graph_counting_class.svg", width = 8, height = 4.25)
+#print(gg_count)
+#dev.off()
+
+```
+
+## Step 8.5: Graphic 3 - Parallel sets across content dimensions
+
+```{r parallel sets data preparation}
+alluvial_data <- full_dataset |>
+  group_by(disease) |>
+  # Defining factor levels for labeling and ordering
+  mutate(
+    parc_multcoin = factor(
+      parc_multcoin,
+        levels = 5:1,
+        labels = c("VR", "Ri", "Re", "Po", "VP")),
+      parc_txt = factor(
+        parc_txt,
+        levels = 5:1,
+        labels = c("VR", "Ri", "Re", "Po", "VP")),
+      parc_edt = factor(
+        parc_edt,
+        levels = 5:1,
+        labels = c("VR", "Ri", "Re", "Po", "VP")),
+      parc_ref = factor(
+        parc_ref,
+        levels = 5:1,
+        labels = c("VR", "Ri", "Re", "Po", "VP")),
+      disease = factor(
+        disease,
+          levels = c("Parkinson", "Alzheimer"),
+          labels = c("Parkinson's Disease", "Alzheimer's Disease"))
+  ) |>
+  ungroup()
+
+alluvial_data$id <- seq_len(nrow(alluvial_data))
+
+# Converting to "lodes" format - a long format based on subgroups of the classes.
+lodes_data <- to_lodes_form(
+  alluvial_data,
+  axes = c("parc_txt", "parc_edt", "parc_ref"),
+  id = "id"
+)
+```
+
+```{r parallel sets  visualization, results = FALSE}
+parallel_gg <- ggplot(
+  lodes_data,
+  aes(
+    x = x,
+    stratum = stratum,
+    alluvium = id,
+    y = 1,
+    fill = parc_multcoin
+  )
+) +
+  geom_alluvium(
+    aes(
+      fill = parc_multcoin,
+      color = parc_multcoin
+    ),
+    width = 0.05,
+    alpha = 1,
+    linewidth = 0.03,
+    curve_type = "cubic"
+  ) +
+  geom_stratum(fill = "grey90", color = "black", show.legend = FALSE, width = .25, size = .05) +
+  geom_text(stat = "stratum", aes(label = stratum), size = 3) +
+  scale_x_discrete(
+    limits = c("parc_txt", "parc_edt", "parc_ref"),
+    labels = c("Textual", "Editorial", "Referential")
+  ) +
+  scale_fill_viridis(
+    discrete = TRUE,
+    option = "D",
+    na.translate = FALSE,
+    drop = TRUE,
+    labels = c("VR" = "Very Rich (VR)",
+               "Ri" = "Rich (Ri)",
+               "Re" = "Regular (Re)",
+               "Po" = "Poor (Po)",
+               "VP" = "Very Poor (VP)"),
+    begin = .1,
+    end =.9
+  ) +
+  scale_color_viridis(
+    discrete = TRUE,
+    option = "D",
+    na.translate = FALSE,
+    guide = "none",
+    begin = .1,
+    end = .9
+  ) +
+  facet_wrap(~ disease, ncol = 2) +
+  theme_minimal() +
+  labs(
+    title = "Content classifications across each dimension and Multcoin",
+    y = NULL,
+    x = NULL
+  ) +
+  guides(
+    fill = guide_legend(
+      nrow = 5,                        
+      title = "Multcoin \nClassification",
+      title.position = "top"
+    )
+  ) +
+  theme_minimal(base_family = "serif") +
+  theme(
+    # Legend
+    legend.position = "left",
+    # Grid
+    panel.grid.minor.x = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    # Text
+    axis.title.y = element_blank(),
+    axis.title.x = element_blank(),
+    axis.text.x = element_text(size = 9, color = "black"),
+    axis.text.y = element_blank(),
+    strip.text = element_text(size = 12),
+    plot.title = element_text(color = "black", size = 14, face = "bold"),
+    plot.caption = element_text(hjust = 0, size = 9),
+    # Border
+    panel.border = element_rect(color = "grey80", fill = NA, linewidth = 0.5),
+    strip.background = element_rect(fill = "grey90", color = NA)
+  )
+
+parallel_gg
+
+# Exporting as .svg file for further editing
+#svg("graph_parallel_sets.svg", width = 8, height = 4)
+#print(parallel_gg)
+#dev.off()
+```
+
+
+
+
+
